@@ -217,21 +217,29 @@
     obs.observe(wrap);
   };
 
-  // ===== GALLERY — lazy load + reveal một observer =====
+  // ===== GALLERY — skeleton ngay, ảnh load tuần tự để tránh giật cột =====
   const initGallery = () => {
     const grid = $('#albumGrid');
+    const mobile = isMobile();
+    const reduceMotion = prefersReducedMotion();
     const items = [];
+    const queued = new Set();
     const frag = document.createDocumentFragment();
 
     albumImages.forEach((src, i) => {
       const item = document.createElement('div');
       item.className = 'gallery__item';
+
+      const frame = document.createElement('div');
+      frame.className = 'gallery__frame';
+
       const img = document.createElement('img');
       img.dataset.src = src;
       img.alt = `Ảnh cưới ${i + 1}`;
       img.decoding = 'async';
-      img.loading = 'lazy';
-      item.appendChild(img);
+
+      frame.appendChild(img);
+      item.appendChild(frame);
       item.addEventListener('click', () => openLb(i));
       frag.appendChild(item);
       items.push(item);
@@ -239,39 +247,76 @@
 
     grid.appendChild(frag);
 
-    const loadItem = (item) => {
-      const img = item.querySelector('img');
-      if (!img || img.dataset.loaded === '1') return;
-      img.src = img.dataset.src;
-      img.dataset.loaded = '1';
+    const loadImage = (img) =>
+      new Promise((resolve) => {
+        if (!img || img.dataset.loaded === '1') {
+          resolve();
+          return;
+        }
+
+        const finish = () => {
+          img.classList.add('loaded');
+          img.closest('.gallery__item')?.classList.add('gallery__item--loaded');
+          resolve();
+        };
+
+        img.addEventListener('load', finish, { once: true });
+        img.addEventListener('error', finish, { once: true });
+        img.src = img.dataset.src;
+        img.dataset.loaded = '1';
+        if (img.complete) finish();
+      });
+
+    const loadGap = () => {
+      if (reduceMotion) return 0;
+      return mobile ? 140 : 70;
     };
 
-    const cols = () =>
-      window.innerWidth < 768 ? 2 : window.innerWidth >= 1100 ? 4 : 3;
+    let loadChain = Promise.resolve();
+
+    const scheduleLoad = (index) => {
+      if (queued.has(index)) return;
+      queued.add(index);
+
+      loadChain = loadChain.then(async () => {
+        const item = items[index];
+        if (!item) return;
+        await loadImage(item.querySelector('img'));
+        await new Promise((r) => setTimeout(r, loadGap()));
+      });
+    };
+
+    const revealItem = (item) => {
+      requestAnimationFrame(() => item.classList.add('vis'));
+    };
 
     if (!('IntersectionObserver' in window)) {
-      items.forEach((item) => {
-        loadItem(item);
-        item.classList.add('vis');
+      items.forEach((item, i) => {
+        revealItem(item);
+        scheduleLoad(i);
       });
       return;
     }
 
     const obs = new IntersectionObserver(
       (entries) => {
-        entries.forEach((e) => {
-          if (!e.isIntersecting) return;
-          const item = e.target;
-          loadItem(item);
-          const i = items.indexOf(item);
-          if (i >= 0) {
-            item.style.transitionDelay = `${(i % cols()) * 0.06}s`;
-          }
-          item.classList.add('vis');
-          obs.unobserve(item);
-        });
+        entries
+          .filter((e) => e.isIntersecting)
+          .sort(
+            (a, b) => items.indexOf(a.target) - items.indexOf(b.target),
+          )
+          .forEach((e) => {
+            const item = e.target;
+            const index = items.indexOf(item);
+            obs.unobserve(item);
+            revealItem(item);
+            scheduleLoad(index);
+          });
       },
-      { threshold: 0.01, rootMargin: '180px 0px' },
+      {
+        threshold: 0,
+        rootMargin: mobile ? '48px 0px 64px 0px' : '100px 0px',
+      },
     );
 
     items.forEach((item) => obs.observe(item));
