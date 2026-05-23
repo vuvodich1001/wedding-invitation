@@ -42,7 +42,7 @@ const weddingData = {
     'images/ANHBAN/BAO_9588.jpg',
   ],
 
-  anhBia: 'images/ALBUM/@bia.jpg',
+  anhBia: 'images/ALBUM/AB_15.jpg',
 
   anhAlbum: [
     'images/ALBUM/AB_01.jpg',

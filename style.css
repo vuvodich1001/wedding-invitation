@@ -97,19 +97,38 @@ fieldset { border: none; }
 .reveal[data-delay="1"] { transition-delay: .12s; }
 .reveal[data-delay="2"] { transition-delay: .24s; }
 
-/* PETALS */
-#petals-container { position: fixed; inset: 0; pointer-events: none; z-index: 9999; }
+/* PETALS — GPU-friendly, tắt trên mobile (JS) */
+#petals-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  contain: strict;
+}
+
 .petal {
   position: absolute;
+  top: 0;
   border-radius: 50% 0 50% 50%;
   opacity: 0;
+  will-change: transform, opacity;
   animation: drift linear infinite;
   background: var(--accent);
 }
+
 @keyframes drift {
-  0%   { transform: translateY(-8vh) rotate(0) translateX(0); opacity: .45; }
-  50%  { transform: translateY(50vh) rotate(180deg) translateX(25px); opacity: .3; }
-  100% { transform: translateY(108vh) rotate(360deg) translateX(-15px); opacity: 0; }
+  0% {
+    transform: translate3d(0, -8vh, 0) rotate(0deg);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate3d(1.5rem, 50vh, 0) rotate(180deg);
+    opacity: 0.28;
+  }
+  100% {
+    transform: translate3d(-0.5rem, 108vh, 0) rotate(360deg);
+    opacity: 0;
+  }
 }
 
 /* ========== HERO (mobile-first, rem) ========== */
@@ -134,10 +153,15 @@ fieldset { border: none; }
   position: absolute;
   inset: 0;
   opacity: 0;
-  transition: opacity 1.4s var(--ease);
+  contain: layout style paint;
+  transition: opacity 1s var(--ease);
+  pointer-events: none;
 }
 
-.hero__slide.active { opacity: 1; }
+.hero__slide.active {
+  opacity: 1;
+  will-change: opacity;
+}
 
 .hero__slide-blur {
   position: absolute;
@@ -145,7 +169,8 @@ fieldset { border: none; }
   background-size: cover;
   background-position: center;
   filter: blur(2.5rem) saturate(1.05) brightness(0.45);
-  transform: scale(1.12);
+  transform: scale(1.12) translateZ(0);
+  backface-visibility: hidden;
 }
 
 .hero__slide-img {
@@ -155,6 +180,13 @@ fieldset { border: none; }
   height: 100%;
   object-fit: contain;
   object-position: center;
+  transform: translateZ(0);
+}
+
+/* Mobile: tắt blur (tốn GPU), chỉ overlay + ảnh */
+@media (max-width: 47.9375rem) {
+  .hero__slide-blur { display: none; }
+  .hero__slide { transition-duration: 0.85s; }
 }
 
 .hero__overlay {
@@ -422,8 +454,10 @@ fieldset { border: none; }
 }
 
 .card__photo {
+  display: block;
   width: 100%;
   max-width: 320px;
+  height: auto;
   margin: 0 auto 1.8rem;
   border-radius: var(--r);
   box-shadow: var(--shadow-s);
@@ -637,13 +671,31 @@ fieldset { border: none; }
   overflow: hidden;
   cursor: pointer;
   opacity: 0;
-  transform: translateY(18px);
-  transition: opacity .55s var(--ease), transform .55s var(--ease), box-shadow .3s;
+  transform: translateY(1rem);
+  transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 12rem;
 }
-.gallery__item.vis { opacity: 1; transform: none; }
-.gallery__item:hover { box-shadow: 0 12px 36px rgba(139, 30, 45, 0.15); }
-.gallery__item img { width: 100%; display: block; transition: transform .45s var(--ease-spring); }
-.gallery__item:hover img { transform: scale(1.03); }
+
+.gallery__item.vis {
+  opacity: 1;
+  transform: none;
+}
+
+.gallery__item img {
+  width: 100%;
+  display: block;
+  background: var(--secondary);
+}
+
+@media (hover: hover) {
+  .gallery__item {
+    transition: opacity 0.45s var(--ease), transform 0.45s var(--ease), box-shadow 0.3s;
+  }
+  .gallery__item:hover { box-shadow: 0 12px 36px rgba(139, 30, 45, 0.15); }
+  .gallery__item img { transition: transform 0.45s var(--ease-spring); }
+  .gallery__item:hover img { transform: scale(1.02); }
+}
 
 /* ========== LIGHTBOX ========== */
 .lb {
@@ -739,7 +791,11 @@ fieldset { border: none; }
   .sec { padding: 4rem 0; }
   .card__families { grid-template-columns: 1fr; gap: 1.2rem; }
   .gallery { columns: 2; column-gap: 0.5rem; }
-  .gallery__item { margin-bottom: 0.5rem; }
+  .gallery__item { margin-bottom: 0.5rem; contain-intrinsic-size: auto 9rem; }
+  .reveal {
+    transform: translateY(0.75rem);
+    transition-duration: 0.45s;
+  }
   .footer__grid { grid-template-columns: 1fr; gap: 1rem; }
   .lb__btn--prev { left: 0.6rem; }
   .lb__btn--next { right: 0.6rem; }

@@ -5,7 +5,11 @@
   const $$ = (s) => document.querySelectorAll(s);
   const d = weddingData;
 
-  // ===== DEDUPLICATE =====
+  const imgUrl = (path) => encodeURI(path);
+  const isMobile = () => window.matchMedia('(max-width: 47.9375rem)').matches;
+  const prefersReducedMotion = () =>
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   const dedupe = (paths) => {
     const seen = new Set();
     return paths.filter((p) => {
@@ -16,15 +20,15 @@
     });
   };
 
-  const albumImages = dedupe(d.anhAlbum);
+  const albumImages = dedupe(d.anhAlbum).map(imgUrl);
 
-  // ===== POPULATE =====
   const populate = () => {
     $('#heroGroom').textContent = d.chuRe;
     $('#heroBride').textContent = d.coDau;
     $('#heroDate').textContent = `${d.thuNgay} · ${d.ngayCuoi}`;
 
-    $('#loiNgoCover').src = d.anhBia;
+    $('#loiNgoCover').src = imgUrl(d.anhBia);
+    $('#loiNgoCover').decoding = 'async';
     $('#loiNgoText').textContent = d.loiNgo;
     $('#nhaTrai').textContent = `Ông ${d.nhaTrai.cha} & Bà ${d.nhaTrai.me}`;
     $('#nhaTraiDiaChi').textContent = d.nhaTrai.diaChi;
@@ -52,96 +56,239 @@
     $('#footerNhaGaiDiaChi').textContent = d.nhaGai.diaChi;
   };
 
-  // ===== HERO SLIDESHOW =====
+  // ===== HERO — lazy slides, blur chỉ desktop, preload kế tiếp =====
   const initHero = () => {
     const container = $('#heroSlides');
-    const images = d.anhHero;
+    const images = d.anhHero.map(imgUrl);
+    const mobile = isMobile();
+    const reduceMotion = prefersReducedMotion();
     let current = 0;
+    let timer = null;
     const slides = [];
 
-    images.forEach((src, i) => {
+    const loadSlide = (index) => {
+      const slide = slides[index];
+      if (!slide || slide.dataset.loaded === '1') return;
+
+      const src = images[index];
+      const img = slide.querySelector('.hero__slide-img');
+      if (img) {
+        img.src = src;
+        img.dataset.loaded = '1';
+      }
+
+      const blur = slide.querySelector('.hero__slide-blur');
+      if (blur) blur.style.backgroundImage = `url("${src}")`;
+
+      slide.dataset.loaded = '1';
+    };
+
+    const preloadNext = (fromIndex) => {
+      loadSlide((fromIndex + 1) % images.length);
+    };
+
+    images.forEach((_, i) => {
       const slide = document.createElement('div');
       slide.className = `hero__slide${i === 0 ? ' active' : ''}`;
 
-      const blur = document.createElement('div');
-      blur.className = 'hero__slide-blur';
-      blur.style.backgroundImage = `url(${src})`;
+      if (!mobile) {
+        const blur = document.createElement('div');
+        blur.className = 'hero__slide-blur';
+        slide.appendChild(blur);
+      }
 
       const img = document.createElement('img');
       img.className = 'hero__slide-img';
       img.alt = 'Ảnh cưới';
-      img.loading = i < 2 ? 'eager' : 'lazy';
-      img.src = src;
-
-      slide.appendChild(blur);
+      img.decoding = 'async';
+      if (i === 0) {
+        img.loading = 'eager';
+        img.setAttribute('fetchpriority', 'high');
+      } else {
+        img.loading = 'lazy';
+      }
       slide.appendChild(img);
       container.appendChild(slide);
       slides.push(slide);
     });
 
-    setInterval(() => {
+    loadSlide(0);
+    preloadNext(0);
+
+    const goTo = (next) => {
       slides[current].classList.remove('active');
-      current = (current + 1) % slides.length;
+      current = next;
       slides[current].classList.add('active');
-    }, 5500);
+      loadSlide(current);
+      preloadNext(current);
+    };
+
+    const startTimer = () => {
+      if (reduceMotion || images.length < 2) return;
+      stopTimer();
+      timer = window.setInterval(
+        () => goTo((current + 1) % images.length),
+        mobile ? 7000 : 5500,
+      );
+    };
+
+    const stopTimer = () => {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    startTimer();
+    document.addEventListener('visibilitychange', () => {
+      document.hidden ? stopTimer() : startTimer();
+    });
   };
 
   // ===== COUNTDOWN =====
   const initCountdown = () => {
     const [dd, mm, yyyy] = d.ngayCuoi.split('/');
     const target = new Date(`${yyyy}-${mm}-${dd}T${d.gioToChuc}:00`).getTime();
+    const els = {
+      days: $('#cdDays'),
+      hours: $('#cdHours'),
+      minutes: $('#cdMinutes'),
+      seconds: $('#cdSeconds'),
+    };
 
     const tick = () => {
       const diff = Math.max(0, target - Date.now());
-      $('#cdDays').textContent = String(Math.floor(diff / 864e5)).padStart(
-        2,
-        '0',
-      );
-      $('#cdHours').textContent = String(
+      els.days.textContent = String(Math.floor(diff / 864e5)).padStart(2, '0');
+      els.hours.textContent = String(
         Math.floor((diff % 864e5) / 36e5),
       ).padStart(2, '0');
-      $('#cdMinutes').textContent = String(
+      els.minutes.textContent = String(
         Math.floor((diff % 36e5) / 6e4),
       ).padStart(2, '0');
-      $('#cdSeconds').textContent = String(
+      els.seconds.textContent = String(
         Math.floor((diff % 6e4) / 1e3),
       ).padStart(2, '0');
     };
 
     tick();
-    setInterval(tick, 1000);
+    let interval = window.setInterval(tick, 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        window.clearInterval(interval);
+        interval = null;
+      } else if (!interval) {
+        tick();
+        interval = window.setInterval(tick, 1000);
+      }
+    });
   };
 
-  // ===== MAP =====
+  // ===== MAP — chỉ mount khi scroll tới =====
   const initMap = () => {
     if (!d.googleMapEmbed || d.googleMapEmbed.includes('!1s0x0')) return;
+
     const wrap = $('#mapWrap');
-    const iframe = document.createElement('iframe');
-    iframe.src = d.googleMapEmbed;
-    iframe.allowFullscreen = true;
-    iframe.loading = 'lazy';
-    iframe.referrerPolicy = 'no-referrer-when-downgrade';
-    wrap.appendChild(iframe);
+    if (!wrap) return;
+
+    const mount = () => {
+      if (wrap.querySelector('iframe')) return;
+      const iframe = document.createElement('iframe');
+      iframe.src = d.googleMapEmbed;
+      iframe.allowFullscreen = true;
+      iframe.loading = 'lazy';
+      iframe.referrerPolicy = 'no-referrer-when-downgrade';
+      wrap.appendChild(iframe);
+    };
+
+    if (!('IntersectionObserver' in window)) {
+      mount();
+      return;
+    }
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          mount();
+          obs.disconnect();
+        }
+      },
+      { rootMargin: '120px' },
+    );
+    obs.observe(wrap);
   };
 
-  // ===== GALLERY =====
+  // ===== GALLERY — lazy load + reveal một observer =====
   const initGallery = () => {
     const grid = $('#albumGrid');
+    const items = [];
+    const frag = document.createDocumentFragment();
+
     albumImages.forEach((src, i) => {
       const item = document.createElement('div');
       item.className = 'gallery__item';
       const img = document.createElement('img');
-      img.src = src;
+      img.dataset.src = src;
       img.alt = `Ảnh cưới ${i + 1}`;
+      img.decoding = 'async';
       img.loading = 'lazy';
       item.appendChild(img);
       item.addEventListener('click', () => openLb(i));
-      grid.appendChild(item);
+      frag.appendChild(item);
+      items.push(item);
     });
+
+    grid.appendChild(frag);
+
+    const loadItem = (item) => {
+      const img = item.querySelector('img');
+      if (!img || img.dataset.loaded === '1') return;
+      img.src = img.dataset.src;
+      img.dataset.loaded = '1';
+    };
+
+    const cols = () =>
+      window.innerWidth < 768 ? 2 : window.innerWidth >= 1100 ? 4 : 3;
+
+    if (!('IntersectionObserver' in window)) {
+      items.forEach((item) => {
+        loadItem(item);
+        item.classList.add('vis');
+      });
+      return;
+    }
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (!e.isIntersecting) return;
+          const item = e.target;
+          loadItem(item);
+          const i = items.indexOf(item);
+          if (i >= 0) {
+            item.style.transitionDelay = `${(i % cols()) * 0.06}s`;
+          }
+          item.classList.add('vis');
+          obs.unobserve(item);
+        });
+      },
+      { threshold: 0.01, rootMargin: '180px 0px' },
+    );
+
+    items.forEach((item) => obs.observe(item));
   };
 
   // ===== LIGHTBOX =====
   let lbIdx = 0;
+  const lbPreloaded = new Set();
+
+  const preloadLb = (index) => {
+    const src = albumImages[index];
+    if (!src || lbPreloaded.has(src)) return;
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = src;
+    lbPreloaded.add(src);
+  };
 
   const openLb = (i) => {
     lbIdx = i;
@@ -149,6 +296,8 @@
     $('#lightbox').setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
     renderLb();
+    preloadLb((lbIdx + 1) % albumImages.length);
+    preloadLb((lbIdx - 1 + albumImages.length) % albumImages.length);
   };
 
   const closeLb = () => {
@@ -160,15 +309,19 @@
   const renderLb = () => {
     $('#lbImg').src = albumImages[lbIdx];
     $('#lbCount').textContent = `${lbIdx + 1} / ${albumImages.length}`;
+    lbPreloaded.add(albumImages[lbIdx]);
   };
 
   const lbPrev = () => {
     lbIdx = (lbIdx - 1 + albumImages.length) % albumImages.length;
     renderLb();
+    preloadLb((lbIdx - 1 + albumImages.length) % albumImages.length);
   };
+
   const lbNext = () => {
     lbIdx = (lbIdx + 1) % albumImages.length;
     renderLb();
+    preloadLb((lbIdx + 1) % albumImages.length);
   };
 
   const initLb = () => {
@@ -208,6 +361,11 @@
 
   // ===== REVEAL =====
   const initReveal = () => {
+    if (!('IntersectionObserver' in window)) {
+      $$('.reveal').forEach((el) => el.classList.add('vis'));
+      return;
+    }
+
     const obs = new IntersectionObserver(
       (entries) =>
         entries.forEach((e) => {
@@ -216,53 +374,47 @@
             obs.unobserve(e.target);
           }
         }),
-      { threshold: 0.12, rootMargin: '0px 0px -40px 0px' },
+      { threshold: 0.08, rootMargin: '0px 0px -24px 0px' },
     );
     $$('.reveal').forEach((el) => obs.observe(el));
   };
 
-  // ===== GALLERY STAGGER =====
-  const initGalleryReveal = () => {
-    const items = $$('.gallery__item');
-    const obs = new IntersectionObserver(
-      (entries) =>
-        entries.forEach((e) => {
-          if (e.isIntersecting) {
-            const i = [...items].indexOf(e.target);
-            const cols =
-              window.innerWidth < 768 ? 2 : window.innerWidth >= 1100 ? 4 : 3;
-            e.target.style.transitionDelay = `${(i % cols) * 0.08}s`;
-            e.target.classList.add('vis');
-            obs.unobserve(e.target);
-          }
-        }),
-      { threshold: 0.04, rootMargin: '0px 0px -20px 0px' },
-    );
-    items.forEach((item) => obs.observe(item));
-  };
-
-  // ===== PETALS =====
+  // ===== PETALS — pool tái sử dụng, tắt trên mobile =====
   const initPetals = () => {
+    if (isMobile() || prefersReducedMotion()) return;
+
     const box = $('#petals-container');
-    const n = window.innerWidth < 768 ? 6 : 10;
-    const spawn = () => {
+    if (!box) return;
+
+    const poolSize = 8;
+    const pool = Array.from({ length: poolSize }, () => {
       const p = document.createElement('div');
       p.className = 'petal';
-      p.style.left = `${Math.random() * 100}%`;
-      p.style.animationDuration = `${11 + Math.random() * 7}s`;
-      const size = `${5 + Math.random() * 7}px`;
-      p.style.width = size;
-      p.style.height = size;
       box.appendChild(p);
-      p.addEventListener('animationend', () => {
-        p.remove();
-        spawn();
-      });
+      return p;
+    });
+
+    const resetPetal = (p) => {
+      p.style.left = `${Math.random() * 100}%`;
+      p.style.animationDuration = `${12 + Math.random() * 6}s`;
+      const size = 5 + Math.random() * 6;
+      p.style.width = `${size}px`;
+      p.style.height = `${size}px`;
+      p.style.animationName = 'none';
+      void p.offsetWidth;
+      p.style.animationName = 'drift';
     };
-    for (let i = 0; i < n; i++) setTimeout(spawn, i * 900);
+
+    pool.forEach((p, i) => {
+      p.addEventListener(
+        'animationiteration',
+        () => resetPetal(p),
+        { passive: true },
+      );
+      window.setTimeout(() => resetPetal(p), i * 800);
+    });
   };
 
-  // ===== SCROLL =====
   const initScroll = () => {
     $('#heroCta').addEventListener('click', (e) => {
       e.preventDefault();
@@ -270,17 +422,15 @@
     });
   };
 
-  // ===== BOOT =====
   document.addEventListener('DOMContentLoaded', () => {
     populate();
     initHero();
     initCountdown();
-    initMap();
+    initReveal();
     initGallery();
     initLb();
-    initReveal();
+    initMap();
     initPetals();
     initScroll();
-    requestAnimationFrame(initGalleryReveal);
   });
 })();
