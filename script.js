@@ -35,9 +35,6 @@
     $('#nhaGai').textContent = `Ông ${d.nhaGai.cha} & Bà ${d.nhaGai.me}`;
     $('#nhaGaiDiaChi').textContent = d.nhaGai.diaChi;
 
-    $('#gioLe').textContent = d.gioLeTanHon;
-    $('#ngayLe').textContent = `${d.thuNgay} · ${d.ngayCuoi}`;
-    $('#amLichLe').textContent = d.amLich;
     $('#gioTiec').textContent = d.gioToChuc;
     $('#tenNhaHang').textContent = d.nhaHang;
     $('#tenSanh').textContent = d.sanh;
@@ -46,14 +43,7 @@
     $('#amLichTiec').textContent = d.amLich;
     $('#donKhach').textContent = d.donKhach;
     $('#khaiTiec').textContent = d.khaiTiec;
-    $('#mapBtn').href = d.googleMap;
-
     $('#footerNames').textContent = `${d.chuRe} & ${d.coDau}`;
-    $('#footerNhaTrai').textContent =
-      `Ông ${d.nhaTrai.cha} & Bà ${d.nhaTrai.me}`;
-    $('#footerNhaTraiDiaChi').textContent = d.nhaTrai.diaChi;
-    $('#footerNhaGai').textContent = `Ông ${d.nhaGai.cha} & Bà ${d.nhaGai.me}`;
-    $('#footerNhaGaiDiaChi').textContent = d.nhaGai.diaChi;
   };
 
   // ===== HERO — lazy slides, blur chỉ desktop, preload kế tiếp =====
@@ -165,9 +155,10 @@
       els.minutes.textContent = String(
         Math.floor((diff % 36e5) / 6e4),
       ).padStart(2, '0');
-      els.seconds.textContent = String(
-        Math.floor((diff % 6e4) / 1e3),
-      ).padStart(2, '0');
+      els.seconds.textContent = String(Math.floor((diff % 6e4) / 1e3)).padStart(
+        2,
+        '0',
+      );
     };
 
     tick();
@@ -185,7 +176,7 @@
 
   // ===== MAP — chỉ mount khi scroll tới =====
   const initMap = () => {
-    if (!d.googleMapEmbed || d.googleMapEmbed.includes('!1s0x0')) return;
+    if (!d.googleMapEmbed) return;
 
     const wrap = $('#mapWrap');
     if (!wrap) return;
@@ -217,166 +208,146 @@
     obs.observe(wrap);
   };
 
-  // ===== GALLERY — skeleton ngay, ảnh load tuần tự để tránh giật cột =====
+  const initMapDirections = () => {
+    const btn = $('#mapBtn');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+      const lat = d.diaDiemLat;
+      const lng = d.diaDiemLng;
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+        '_blank',
+      );
+    });
+  };
+
+  // ===== GALLERY — lazy native, không xếp hàng tải =====
   const initGallery = () => {
     const grid = $('#albumGrid');
+    if (!grid) return;
+
     const mobile = isMobile();
-    const reduceMotion = prefersReducedMotion();
-    const items = [];
-    const queued = new Set();
+    const cols = mobile ? 1 : window.matchMedia('(min-width: 64rem)').matches ? 3 : 2;
+    const eagerCount = cols * 2;
     const frag = document.createDocumentFragment();
 
-    albumImages.forEach((src, i) => {
-      const item = document.createElement('div');
-      item.className = 'gallery__item';
+    const markLoaded = (img, item) => {
+      img.classList.add('loaded');
+      item.classList.add('gallery__item--loaded');
+    };
 
-      const frame = document.createElement('div');
-      frame.className = 'gallery__frame';
+    albumImages.forEach((src, i) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'gallery__item';
+      item.dataset.index = String(i);
+      item.setAttribute('aria-label', `Xem ảnh cưới ${i + 1}`);
 
       const img = document.createElement('img');
-      img.dataset.src = src;
-      img.alt = `Ảnh cưới ${i + 1}`;
+      img.alt = '';
       img.decoding = 'async';
+      img.loading = i < eagerCount ? 'eager' : 'lazy';
+      if (i === 0) img.setAttribute('fetchpriority', 'high');
 
-      frame.appendChild(img);
-      item.appendChild(frame);
+      const onReady = () => markLoaded(img, item);
+      img.addEventListener('load', onReady, { once: true });
+      img.addEventListener('error', onReady, { once: true });
+      img.src = src;
+
+      if (img.complete) onReady();
+
+      item.appendChild(img);
       item.addEventListener('click', () => openLb(i));
       frag.appendChild(item);
-      items.push(item);
     });
 
     grid.appendChild(frag);
-
-    const loadImage = (img) =>
-      new Promise((resolve) => {
-        if (!img || img.dataset.loaded === '1') {
-          resolve();
-          return;
-        }
-
-        const finish = () => {
-          img.classList.add('loaded');
-          img.closest('.gallery__item')?.classList.add('gallery__item--loaded');
-          resolve();
-        };
-
-        img.addEventListener('load', finish, { once: true });
-        img.addEventListener('error', finish, { once: true });
-        img.src = img.dataset.src;
-        img.dataset.loaded = '1';
-        if (img.complete) finish();
-      });
-
-    const loadGap = () => {
-      if (reduceMotion) return 0;
-      return mobile ? 140 : 70;
-    };
-
-    let loadChain = Promise.resolve();
-
-    const scheduleLoad = (index) => {
-      if (queued.has(index)) return;
-      queued.add(index);
-
-      loadChain = loadChain.then(async () => {
-        const item = items[index];
-        if (!item) return;
-        await loadImage(item.querySelector('img'));
-        await new Promise((r) => setTimeout(r, loadGap()));
-      });
-    };
-
-    const revealItem = (item) => {
-      requestAnimationFrame(() => item.classList.add('vis'));
-    };
-
-    if (!('IntersectionObserver' in window)) {
-      items.forEach((item, i) => {
-        revealItem(item);
-        scheduleLoad(i);
-      });
-      return;
-    }
-
-    const obs = new IntersectionObserver(
-      (entries) => {
-        entries
-          .filter((e) => e.isIntersecting)
-          .sort(
-            (a, b) => items.indexOf(a.target) - items.indexOf(b.target),
-          )
-          .forEach((e) => {
-            const item = e.target;
-            const index = items.indexOf(item);
-            obs.unobserve(item);
-            revealItem(item);
-            scheduleLoad(index);
-          });
-      },
-      {
-        threshold: 0,
-        rootMargin: mobile ? '48px 0px 64px 0px' : '100px 0px',
-      },
-    );
-
-    items.forEach((item) => obs.observe(item));
   };
 
-  // ===== LIGHTBOX =====
+  // ===== LIGHTBOX — carousel, chỉ tải ảnh khi cần =====
   let lbIdx = 0;
-  const lbPreloaded = new Set();
+  let lbTrack = null;
+  const lbSlides = [];
 
-  const preloadLb = (index) => {
-    const src = albumImages[index];
-    if (!src || lbPreloaded.has(src)) return;
-    const img = new Image();
+  const loadLbSlide = (index) => {
+    const slide = lbSlides[index];
+    if (!slide) return;
+    const img = slide.querySelector('img');
+    if (!img?.dataset.src) return;
+    img.src = img.dataset.src;
     img.decoding = 'async';
-    img.src = src;
-    lbPreloaded.add(src);
+    delete img.dataset.src;
+  };
+
+  const preloadLbNeighbors = (index) => {
+    loadLbSlide(index);
+    loadLbSlide((index - 1 + albumImages.length) % albumImages.length);
+    loadLbSlide((index + 1) % albumImages.length);
   };
 
   const openLb = (i) => {
     lbIdx = i;
-    $('#lightbox').classList.add('open');
-    $('#lightbox').setAttribute('aria-hidden', 'false');
+    const lb = $('#lightbox');
+    lb.classList.add('open');
+    lb.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
+    preloadLbNeighbors(lbIdx);
     renderLb();
-    preloadLb((lbIdx + 1) % albumImages.length);
-    preloadLb((lbIdx - 1 + albumImages.length) % albumImages.length);
   };
 
   const closeLb = () => {
-    $('#lightbox').classList.remove('open');
-    $('#lightbox').setAttribute('aria-hidden', 'true');
+    const lb = $('#lightbox');
+    lb.classList.remove('open');
+    lb.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
+    if (lbTrack) lbTrack.style.willChange = '';
   };
 
   const renderLb = () => {
-    $('#lbImg').src = albumImages[lbIdx];
+    if (!lbTrack) return;
+    lbTrack.style.willChange = 'transform';
+    lbTrack.style.transform = `translate3d(-${lbIdx * 100}%, 0, 0)`;
     $('#lbCount').textContent = `${lbIdx + 1} / ${albumImages.length}`;
-    lbPreloaded.add(albumImages[lbIdx]);
+    preloadLbNeighbors(lbIdx);
   };
 
   const lbPrev = () => {
     lbIdx = (lbIdx - 1 + albumImages.length) % albumImages.length;
     renderLb();
-    preloadLb((lbIdx - 1 + albumImages.length) % albumImages.length);
   };
 
   const lbNext = () => {
     lbIdx = (lbIdx + 1) % albumImages.length;
     renderLb();
-    preloadLb((lbIdx + 1) % albumImages.length);
   };
 
   const initLb = () => {
+    const track = $('#lbTrack');
+    if (!track) return;
+
+    lbTrack = track;
+    albumImages.forEach((src, i) => {
+      const slide = document.createElement('div');
+      slide.className = 'lb__slide';
+
+      const img = document.createElement('img');
+      img.dataset.src = src;
+      img.alt = `Ảnh cưới ${i + 1}`;
+
+      slide.appendChild(img);
+      track.appendChild(slide);
+      lbSlides.push(slide);
+    });
+
     $('#lbClose').addEventListener('click', closeLb);
     $('#lbPrev').addEventListener('click', lbPrev);
     $('#lbNext').addEventListener('click', lbNext);
 
     $('#lightbox').addEventListener('click', (e) => {
-      if (!e.target.closest('.lb__img') && !e.target.closest('.lb__btn'))
-        closeLb();
+      if (e.target.closest('.lb__btn')) return;
+      if (e.target.closest('.lb__slide img')) return;
+      closeLb();
     });
 
     document.addEventListener('keydown', (e) => {
@@ -451,11 +422,9 @@
     };
 
     pool.forEach((p, i) => {
-      p.addEventListener(
-        'animationiteration',
-        () => resetPetal(p),
-        { passive: true },
-      );
+      p.addEventListener('animationiteration', () => resetPetal(p), {
+        passive: true,
+      });
       window.setTimeout(() => resetPetal(p), i * 800);
     });
   };
@@ -475,6 +444,7 @@
     initGallery();
     initLb();
     initMap();
+    initMapDirections();
     initPetals();
     initScroll();
   });
